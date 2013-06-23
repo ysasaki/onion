@@ -16,7 +16,11 @@
 	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 	*/
 
+#ifdef __APPLE__
+#include <stdlib.h>
+#else
 #include <malloc.h>
+#endif
 #include <stdio.h>
 
 #include <onion/log.h>

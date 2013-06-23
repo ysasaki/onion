@@ -16,6 +16,9 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
     */
 
+#ifndef EDOTDOT
+#define EDOTDOT 0
+#endif
 #include <unistd.h>
 #include <sys/types.h>
 #include <pwd.h>

@@ -151,7 +151,11 @@ void onion_log_stderr(onion_log_level level, const char *filename, int lineno, c
 		level=(sizeof(levelstr)/sizeof(levelstr[0]))-1;
 
 #ifdef HAVE_PTHREADS
+#ifdef __APPLE__
+  int pid=(int)syscall(SYS_thread_selfid);
+#else
   int pid=(int)syscall(SYS_gettid);
+#endif
   if (!(onion_log_flags&OF_NOCOLOR))
     fprintf(stderr, "\033[%dm[%06d]%s ",30 + (pid%7)+1, pid, levelcolor[level]);
   else

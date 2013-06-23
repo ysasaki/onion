@@ -25,7 +25,11 @@
 
 #include <gcrypt.h>
 #include <gnutls/gnutls.h>
+#ifdef __APPLE__
+#include <stdlib.h>
+#else
 #include <malloc.h>
+#endif
 #include <stdarg.h>
 #include <errno.h>
 

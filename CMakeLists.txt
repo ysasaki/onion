@@ -3,14 +3,14 @@ cmake_policy(VERSION 2.8)
 project(libonion)
 
 # Some tweak parameters
-SET(ONION_USE_SSL true)
-SET(ONION_USE_PAM true)
-SET(ONION_USE_PTHREADS true)
-SET(ONION_USE_PNG true)
-SET(ONION_USE_XML2 true)
-SET(ONION_USE_SYSTEMD true)
-SET(ONION_USE_TESTS true)
-SET(ONION_USE_BINDINGS_CPP true)
+SET(ONION_USE_SSL true CACHE BOOL "Use SSL, requires GnuTLS")
+SET(ONION_USE_PAM true CACHE BOOL "Compile PAM handler. Needs libpam")
+SET(ONION_USE_PTHREADS true CACHE BOOL "Compile with pthreads support. Needed for O_THREAD and O_POOL modes")
+SET(ONION_USE_PNG true CACHE BOOL "Adds support for simple image handler")
+SET(ONION_USE_XML2 true CACHE BOOL "Adds support for XML2 lib, which is needed for WebDAV handler")
+SET(ONION_USE_SYSTEMD true CACHE BOOL "Adds simple support for systemd")
+SET(ONION_USE_TESTS true CACHE BOOL "Compile the tests")
+SET(ONION_USE_BINDINGS_CPP true CACHE BOOL "Compile the CPP bindings")
 SET(ONION_VERSION 0.4.0)
 ########
 

@@ -39,7 +39,11 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#ifdef __APPLE__
+#include <stdlib.h>
+#else
 #include <malloc.h>
+#endif
 #include <libgen.h>
 #include <ctype.h>
 

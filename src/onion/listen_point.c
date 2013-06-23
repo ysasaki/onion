@@ -27,7 +27,11 @@
 #include <sys/socket.h>
 
 #include <string.h>
+#ifdef __APPLE__
+#include <stdlib.h>
+#else
 #include <malloc.h>
+#endif
 #include <netdb.h>
 #include <errno.h>
 #include <fcntl.h>

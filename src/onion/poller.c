@@ -23,9 +23,20 @@
 	library; if not see <http://www.gnu.org/licenses/>.
 	*/
 
+#ifdef __APPLE__
+#include <stdlib.h>
+#else
 #include <malloc.h>
+#endif
 #include <errno.h>
+#ifdef __APPLE__
+#define USE_KQUEUE
+#include <sys/types.h>
+#include <sys/time.h>
+#include <sys/event.h>
+#else
 #include <sys/epoll.h>
+#endif
 #include <string.h>
 #include <stdio.h>
 #include <limits.h>
@@ -42,7 +53,13 @@
 #include "types.h"
 #include "poller.h"
 #include <sys/socket.h>
+#ifdef __APPLE__
+struct eventfd {
+    int fds[2];
+};
+#else
 #include <sys/eventfd.h>
+#endif
 #include <fcntl.h>
 
 #ifdef HAVE_PTHREADS
@@ -60,10 +77,20 @@
 # define pthread_mutex_unlock(...)
 #endif
 
+#ifdef USE_KQUEUE
+#define GET_SLOT_PTR(e) (e).udata
+#else
+#define GET_SLOT_PTR(e) (e).data.ptr
+#endif
+
 
 struct onion_poller_t{
 	int fd;
+#ifdef USE_KQUEUE
+    struct eventfd* eventfd;
+#else
 	int eventfd; ///< fd to signal internal changes on poller.
+#endif
 	int n;
   char stop;
 #ifdef HAVE_PTHREADS
@@ -80,7 +107,12 @@ struct onion_poller_slot_t{
 	int fd;
 	int (*f)(void*);
 	void *data;
+#ifdef USE_KQUEUE
+	uint16_t type;
+	uint32_t flags;
+#else
 	int type;
+#endif
 
 	void (*shutdown)(void*);
 	void *shutdown_data;
@@ -112,7 +144,12 @@ onion_poller_slot *onion_poller_slot_new(int fd, int (*f)(void*), void *data){
 	el->data=data;
 	el->timeout=-1;
 	el->timeout_limit=INT_MAX;
+#ifdef USE_KQUEUE
+	el->type=EVFILT_READ;
+	el->flags=EV_ADD | EV_ONESHOT | EV_EOF;
+#else
 	el->type=EPOLLIN | EPOLLHUP | EPOLLONESHOT;
+#endif
 	
 	return el;
 }
@@ -157,6 +194,17 @@ void onion_poller_slot_set_timeout(onion_poller_slot *el, int timeout){
 }
 
 void onion_poller_slot_set_type(onion_poller_slot *el, int type){
+#ifdef USE_KQUEUE
+	el->type=0;
+	el->flags=EV_ADD | EV_ONESHOT | EV_EOF;
+	if (type&O_POLL_READ)
+		el->type|=EVFILT_READ;
+	if (type&O_POLL_WRITE)
+		el->type|=EVFILT_WRITE;
+	if (type&O_POLL_OTHER)
+		el->flags|=EV_ERROR;
+	ONION_DEBUG("Setting type to %d, type: %d, flags: %d", el->fd, el->type, el->flags);
+#else
 	el->type=EPOLLONESHOT;
 	if (type&O_POLL_READ)
 		el->type|=EPOLLIN;
@@ -165,6 +213,7 @@ void onion_poller_slot_set_type(onion_poller_slot *el, int type){
 	if (type&O_POLL_OTHER)
 		el->type|=EPOLLERR|EPOLLHUP|EPOLLPRI;
 	ONION_DEBUG0("Setting type to %d, %d", el->fd, el->type);
+#endif
 }
 
 static int onion_poller_stop_helper(void *p){
@@ -185,6 +234,21 @@ static int onion_poller_stop_helper(void *p){
  */
 onion_poller *onion_poller_new(int n){
 	onion_poller *p=malloc(sizeof(onion_poller));
+#ifdef USE_KQUEUE
+	p->fd=kqueue();
+	if (p->fd < 0){
+		ONION_ERROR("Error creating the poller. %s", strerror(errno));
+		free(p);
+		return NULL;
+	}
+	// FD_CLOEXEC is not supported in OSX
+	struct eventfd* eventfd;
+	eventfd = (struct eventfd*) malloc(sizeof(struct eventfd));
+	pipe(eventfd->fds);
+	fcntl(eventfd->fds[0], F_SETFD, O_NONBLOCK);
+	fcntl(eventfd->fds[1], F_SETFD, O_NONBLOCK);
+	p->eventfd=eventfd;
+#else
 	p->fd=epoll_create1(EPOLL_CLOEXEC);
 	if (p->fd < 0){
 		ONION_ERROR("Error creating the poller. %s", strerror(errno));
@@ -195,12 +259,17 @@ onion_poller *onion_poller_new(int n){
 #if EFD_CLOEXEC == 0
   fcntl(p->eventfd,F_SETFD,FD_CLOEXEC);
 #endif
+#endif
 	p->head=NULL;
 	p->n=0;
   p->stop=0;
 
 #ifdef HAVE_PTHREADS
+#ifdef USE_KQUEUE
+  ONION_DEBUG("Init thread stuff for poll. Eventfd at %d", p->eventfd->fds[0]);
+#else
   ONION_DEBUG("Init thread stuff for poll. Eventfd at %d", p->eventfd);
+#endif
   p->npollers=0;
   pthread_mutexattr_t attr;
   pthread_mutexattr_init(&attr);
@@ -209,7 +278,12 @@ onion_poller *onion_poller_new(int n){
   pthread_mutexattr_destroy(&attr);
 #endif
 
+  ONION_DEBUG("Add eventfd to poller. Eventfd at %d", p->eventfd);
+#ifdef USE_KQUEUE
+  onion_poller_slot *ev=onion_poller_slot_new(p->eventfd->fds[0],onion_poller_stop_helper,p);
+#else
   onion_poller_slot *ev=onion_poller_slot_new(p->eventfd,onion_poller_stop_helper,p);
+#endif
   onion_poller_add(p,ev);
   
 	return p;
@@ -263,6 +337,14 @@ int onion_poller_add(onion_poller *poller, onion_poller_slot *el){
 	}
 	pthread_mutex_unlock(&poller->mutex);
 	
+#ifdef USE_KQUEUE
+	struct kevent ev;
+	EV_SET(&ev, el->fd, el->type, el->flags, 0, 0, el);
+	if (kevent(poller->fd, &ev, 1, NULL, 0, NULL) < 0 ) {
+		ONION_ERROR("Error add descriptor to listen to. %s", strerror(errno));
+		return 1;
+	}
+#else
 	struct epoll_event ev;
 	memset(&ev, 0, sizeof(ev));
 	ev.events=el->type;
@@ -271,6 +353,7 @@ int onion_poller_add(onion_poller *poller, onion_poller_slot *el){
 		ONION_ERROR("Error add descriptor to listen to. %s", strerror(errno));
 		return 1;
 	}
+#endif
 	return 1;
 }
 
@@ -279,9 +362,11 @@ int onion_poller_add(onion_poller *poller, onion_poller_slot *el){
  * @memberof onion_poller_t
  */
 int onion_poller_remove(onion_poller *poller, int fd){
+#ifndef USE_KQUEUE
 	if (epoll_ctl(poller->fd, EPOLL_CTL_DEL, fd, NULL) < 0){
 		ONION_ERROR("Error remove descriptor to listen to. %s", strerror(errno));
 	}
+#endif
 	
 	pthread_mutex_lock(&poller->mutex);
 	ONION_DEBUG0("Trying to remove fd %d (%d)", fd, poller->n);
@@ -306,9 +391,10 @@ int onion_poller_remove(onion_poller *poller, int fd){
         onion_poller_stop(poller);
       }
       
-			pthread_mutex_unlock(&poller->mutex);
-			
+
 			onion_poller_slot_free(t);
+			poller->n--;
+			pthread_mutex_unlock(&poller->mutex);
 			return 0;
 		}
 		el=el->next;
@@ -353,7 +439,11 @@ static int onion_poller_get_next_timeout(onion_poller *p){
  * If no fd to poll, returns.
  */
 void onion_poller_poll(onion_poller *p){
+#ifdef USE_KQUEUE
+	struct kevent event[MAX_EVENTS];
+#else
 	struct epoll_event event[MAX_EVENTS];
+#endif
 	ONION_DEBUG("Start polling");
 	p->stop=0;
 #ifdef HAVE_PTHREADS
@@ -366,13 +456,27 @@ void onion_poller_poll(onion_poller *p){
 	int maxtime;
 	pthread_mutex_unlock(&p->mutex);
 	time_t ctime;
+#ifdef USE_KQUEUE
+    struct timespec* timeout;
+    timeout = (struct timespec*) calloc(1, sizeof(struct timespec));
+#else
 	int timeout;
+#endif
 	while (!p->stop && p->head){
 		ctime=time(NULL);
 		pthread_mutex_lock(&p->mutex);
 		maxtime=onion_poller_get_next_timeout(p);
 		pthread_mutex_unlock(&p->mutex);
 		
+#ifdef USE_KQUEUE
+		timeout->tv_sec=maxtime-ctime;
+		if (timeout->tv_sec>3600)
+			timeout->tv_sec=3600;
+		ONION_DEBUG0("Wait for %d ms", timeout->tv_sec*1000);
+		int nfds = kevent(p->fd, NULL, 0, event, MAX_EVENTS, timeout);
+		int ctime_end=time(NULL);
+		ONION_DEBUG0("Current time is %d, limit is %d, timeout is %d. Waited for %d seconds", ctime, maxtime, timeout->tv_sec*1000, ctime_end-ctime);
+#else
 		timeout=maxtime-ctime;
 		if (timeout>3600)
 			timeout=3600000;
@@ -382,6 +486,7 @@ void onion_poller_poll(onion_poller *p){
 		int nfds = epoll_wait(p->fd, event, MAX_EVENTS, timeout);
 		int ctime_end=time(NULL);
 		ONION_DEBUG0("Current time is %d, limit is %d, timeout is %d. Waited for %d seconds", ctime, maxtime, timeout, ctime_end-ctime);
+#endif
     ctime=ctime_end;
 
 		pthread_mutex_lock(&p->mutex);
@@ -392,15 +497,15 @@ void onion_poller_poll(onion_poller *p){
 				next=next->next;
 				if (cur->timeout_limit <= ctime){
 					ONION_DEBUG0("Timeout on %d, was %d (ctime %d)", cur->fd, cur->timeout_limit, ctime);
-          int i;
-          for (i=0;i<nfds;i++){
-            onion_poller_slot *el=(onion_poller_slot*)event[i].data.ptr;
-            if (cur==el){ // If removed just one with event, make it ignore the event later.
-              ONION_DEBUG0("Ignoring event as it timeouted: %d", cur->fd);
-              event[i].data.ptr=NULL;
-            }
-          }
-          onion_poller_remove(p, cur->fd);
+					int i;
+					for (i=0;i<nfds;i++){
+						onion_poller_slot *el=(onion_poller_slot*)GET_SLOT_PTR(event[i]);
+						if (cur==el){ // If removed just one with event, make it ignore the event later.
+							ONION_DEBUG0("Ignoring event as it timeouted: %d", cur->fd);
+							GET_SLOT_PTR(event[i])=NULL;
+						}
+					}
+					onion_poller_remove(p, cur->fd);
 				}
 			}
 		}
@@ -418,15 +523,19 @@ void onion_poller_poll(onion_poller *p){
 				return;
 			}
 		}
-		int i;
-		for (i=0;i<nfds;i++){
-			onion_poller_slot *el=(onion_poller_slot*)event[i].data.ptr;
-      if (!el)
-        continue;
+    int i;
+	for (i=0;i<nfds;i++){
+		onion_poller_slot *el=(onion_poller_slot*)GET_SLOT_PTR(event[i]);
+	  if (!el)
+		continue;
 			// Call the callback
 			//ONION_DEBUG("Calling callback for fd %d (%X %X)", el->fd, event[i].events);
 			int n=-1;
+#ifdef USE_KQUEUE
+			if (event[i].flags&EV_EOF){
+#else
 			if (event[i].events&EPOLLRDHUP){
+#endif
 				n=-1;
 			}
 			else{ // I also take care of the timeout, no timeout when on the handler, it should handle it itself.
@@ -448,6 +557,15 @@ void onion_poller_poll(onion_poller *p){
 			}
 			else{
 				ONION_DEBUG0("Re setting poller %d", el->fd);
+#ifdef USE_KQUEUE
+				if (p->fd>=0){
+					EV_SET(&event[i], el->fd, el->type, el->flags, 0, 0, el);
+					int e=kevent(p->fd, &event[i], 1, NULL, 0, NULL);
+					if (e<0){
+						ONION_ERROR("Error resetting poller, %s", strerror(errno));
+					}
+				}
+#else
 				event[i].events=el->type;
 				if (p->fd>=0){
 					int e=epoll_ctl(p->fd, EPOLL_CTL_MOD, el->fd, &event[i]);
@@ -455,6 +573,7 @@ void onion_poller_poll(onion_poller *p){
 						ONION_ERROR("Error resetting poller, %s", strerror(errno));
 					}
 				}
+#endif
 			}
 		}
 	}
@@ -475,14 +594,20 @@ void onion_poller_stop(onion_poller *p){
   ONION_DEBUG("Stopping poller");
   p->stop=1;
   char data[8]={0,0,0,0, 0,0,0,1};
+#ifndef USE_KQUEUE
   int __attribute__((unused)) r=read(p->eventfd, data, 8); // Flush eventfd data, discard data
+#endif
 	
 	pthread_mutex_lock(&p->mutex);
   int n=p->npollers;
 	pthread_mutex_unlock(&p->mutex);
 	
   if (n>0){
+#ifdef USE_KQUEUE
+		int w=write(p->eventfd->fds[1], data, 8);
+#else
 		int w=write(p->eventfd,data,8); // Tell another thread to exit
+#endif
 		if (w<0){
 			ONION_ERROR("Error signaling poller to stop!");
 		}

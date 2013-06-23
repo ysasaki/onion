@@ -24,7 +24,11 @@
 	*/
 
 #include <string.h>
+#ifdef __APPLE__
+#include <stdlib.h>
+#else
 #include <malloc.h>
+#endif
 #include <unistd.h>
 
 #include <security/pam_appl.h>

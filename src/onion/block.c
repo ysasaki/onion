@@ -27,7 +27,11 @@
 #include "block.h"
 #include "log.h"
 
+#ifdef __APPLE__
+#include <stdlib.h>
+#else
 #include <malloc.h>
+#endif
 #include <string.h>
 
 #define ONION_BLOCK_GROW_MIN_BLOCK 16

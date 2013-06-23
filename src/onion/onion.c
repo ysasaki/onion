@@ -131,7 +131,11 @@ int onion_set_certificate(onion *onion, onion_ssl_certificate_type type, const c
  * 
  */
 
+#ifdef __APPLE__
+#include <stdlib.h>
+#else
 #include <malloc.h>
+#endif
 #include <stdio.h>
 #include <signal.h>
 #include <string.h>
@@ -152,6 +156,10 @@ int onion_set_certificate(onion *onion, onion_ssl_certificate_type type, const c
 #include "mime.h"
 #include "http.h"
 #include "https.h"
+
+#ifndef SOCK_CLOEXEC
+#define SOCK_CLOEXEC 0
+#endif
 
 static int onion_default_error(void *handler, onion_request *req, onion_response *res);
 // Import it here as I need it to know if we have a HTTP port.

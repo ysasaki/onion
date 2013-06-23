@@ -23,7 +23,11 @@
 	library; if not see <http://www.gnu.org/licenses/>.
 	*/
 
+#ifdef __APPLE__
+#include <stdlib.h>
+#else
 #include <malloc.h>
+#endif
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>

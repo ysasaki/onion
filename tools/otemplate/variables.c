@@ -21,7 +21,11 @@
 #include <string.h>
 #include <onion/block.h>
 #include <onion/codecs.h>
+#ifdef __APPLE__
+#include <stdlib.h>
+#else
 #include <malloc.h>
+#endif
 
 /**
  * @short Parses a block variable and writes the code necesary.

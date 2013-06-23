@@ -21,7 +21,11 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <string.h>
+#ifdef __APPLE__
+#include <stdlib.h>
+#else
 #include <malloc.h>
+#endif
 #include <stdio.h>
 
 #include <onion/onion.h>

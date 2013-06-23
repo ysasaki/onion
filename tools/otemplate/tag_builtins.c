@@ -19,7 +19,12 @@
 #define _GNU_SOURCE
 
 #include <string.h>
+#ifdef __APPLE__
+#define strdupa(s) strdup((s))
+#include <stdlib.h>
+#else
 #include <malloc.h>
+#endif
 #include <libgen.h>
 
 #include <onion/log.h>

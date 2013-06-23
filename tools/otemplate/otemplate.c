@@ -21,7 +21,16 @@
 #include <ctype.h>
 #include <libgen.h>
 #include <stdarg.h>
+#ifdef __APPLE__
+#define strdupa(s) strdup((s))
+#include <stdlib.h>
+#else
+#ifdef __APPLE__
+#include <stdlib.h>
+#else
 #include <malloc.h>
+#endif
+#endif
 
 #include "onion/log.h"
 #include "onion/block.h"

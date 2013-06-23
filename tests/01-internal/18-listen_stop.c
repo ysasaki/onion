@@ -16,6 +16,10 @@
 	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 	*/
 
+#ifndef SOCK_CLOEXEC
+#define SOCK_CLOEXEC 0
+#endif
+
 #include <signal.h>
 #include <pthread.h>
 #include <unistd.h>
